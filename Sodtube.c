@@ -24,18 +24,13 @@ float *cx;
 float U[N][3];
 float U_new[N][3];
 float *F;
-float *FL;
-float *FR;
-float FP[N][3];
-float FM[N][3];
-float dFP[N][3];
-float dFM[N][3];
+float FL[N][3];
+float FR[N][3];
 
 void Allocate_Memory();
 void Init();
 void Free();
 void CalculateFlux();
-void CalculateFPFM();
 void CalculateResult();
 void Save_Results();
 int main()
@@ -54,7 +49,6 @@ int main()
 	for(i = 0;i < no_steps;i++)
 	{
 	  CalculateFlux();
-	  CalculateFPFM();
 	  CalculateResult();
 	}
 	Save_Results();
@@ -78,8 +72,6 @@ void Allocate_Memory()
         press= (float*)malloc(size);
        	cx = (float*)malloc(size);
 	F = (float*)malloc(3*sizeof(float));
-     	FL= (float*)malloc(3*sizeof(float));
-        FR= (float*)malloc(3*sizeof(float));
 }
 void Init()
 {
@@ -112,74 +104,20 @@ omp_set_num_threads(num_threads);
 void CalculateFlux()
 {
 	int i,j;
-	float a,M,M2,F0,F1,F2;
+	float speed;
 omp_set_num_threads(num_threads);
-#pragma omp parallel for private(F0,F1,F2,a,M,M2)
-	for(i =0;i < N;i++)
+#pragma omp parallel for private(speed)
+	for(i =1;i < (N-1);i++)
 	{
-	        F0 = dens[i]*xv[i];
-                F1 = dens[i]*(xv[i]*xv[i] + R*temp[i]);
-                F2 = xv[i]*(U[i][2] + dens[i]*R*temp[i]);
-		 a = sqrt(GAMA*R*temp[i]);
-		 M = xv[i] / a;
-		if (M > 1.0)
-		  {M = 1.0;}
-		else if(M < -1.0)
-		  {M = -1.0;}
-		 M2 = M*M;
+		speed = sqrt(GAMA*R*temp[i]);
 
-                FP[i][0] = 0.5*(F0*(M + 1.0) + U[i][0]*a*(1-M2));
-                FM[i][0] = -0.5*(F0*(M - 1.0) + U[i][0]*a*(1-M2));
-		FP[i][1] = 0.5*(F1*(M + 1.0) + U[i][1]*a*(1-M2));
-                FM[i][1] = -0.5*(F1*(M - 1.0) + U[i][1]*a*(1-M2));
-		FP[i][2] = 0.5*(F2*(M + 1.0) + U[i][2]*a*(1-M2));
-                FM[i][2] = -0.5*(F2*(M - 1.0) + U[i][2]*a*(1-M2));
-
-
+                FL[i][0] = 0.5*(dens[i-1]*xv[i-1] + dens[i]*xv[i] ) - speed*(U[i][0] - U[i-1][0]);
+                FR[i][0] = 0.5*(dens[i]*xv[i] + dens[i+1]*xv[i+1] ) - speed*(U[i+1][0] - U[i][0]);
+		FL[i][1] = 0.5*(dens[i-1]*(xv[i-1]*xv[i-1] + R*temp[i-1]) + dens[i]*(xv[i]*xv[i] + R*temp[i]) ) - speed*(U[i][1] - U[i-1][1]);
+                FR[i][1] = 0.5*(dens[i]*(xv[i]*xv[i] + R*temp[i]) + dens[i+1]*(xv[i+1]*xv[i+1] + R*temp[i+1]) ) - speed*(U[i+1][1] - U[i][1]);
+		FL[i][2] = 0.5*(xv[i-1]*(U[i-1][2] + dens[i-1]*R*temp[i-1]) + xv[i]*(U[i][2] + dens[i]*R*temp[i]) ) - speed*(U[i][2] - U[i-1][2]);
+                FR[i][2] = 0.5*(xv[i]*(U[i][2] + dens[i]*R*temp[i]) + xv[i+1]*(U[i+1][2] + dens[i+1]*R*temp[i+1]) ) - speed*(U[i+1][2] - U[i][2]);
 	}
-}
-void CalculateFPFM()
-{
-        int i,k;
-	float dFP_left,dFP_right,dFM_left,dFM_right;
-omp_set_num_threads(num_threads);
-#pragma omp parallel for private(dFP_left,dFP_right,dFM_left,dFM_right)
-        for(i = 0;i < N;i++)
-        {
-                dFP[i][0] = 0.0; dFP[i][1] = 0.0; dFP[i][2] = 0.0;
-                dFM[i][0] = 0.0; dFM[i][1] = 0.0; dFM[i][2] = 0.0;
-		if((i > 0) && (i<N-1))
-		{
-//omp_set_num_threads(num_threads);
-//#pragma omp parallel for 
-			for(k = 0;k < 3;k++)
-			{
-				 dFP_left = FP[i+1][k] - FP[i][k];
-                                 dFP_right = FP[i][k] - FP[i-1][k];
-				if (dFP_left *dFP_right > 0)
-				{
-					if(abs(dFP_right) < abs(dFP_left))
-					{
-					  dFP[i][k] = dFP_right /dx;
-					}
-					else
-                                          dFP[i][k] = dFP_left /dx;
-				}
-                                dFM_left = FM[i+1][k] - FM[i][k];
-                                dFM_right = FM[i][k] - FM[i-1][k];
-                                if (dFM_left *dFM_right > 0)
-                                {
-                                        if(abs(dFM_right) < abs(dFM_left))
-                                        {
-                                          dFM[i][k] = dFM_right /dx;
-                                        }
-                                        else
-                                          dFM[i][k] = dFM_left /dx;
-                                }
-
-			}
-		}
-        }
 }
 void CalculateResult()
 {
@@ -192,9 +130,7 @@ void CalculateResult()
 
 		for(j = 0;j < 3;j++)
 		{
-		  FL[j] = (FP[i-1][j] + 0.5*dx*dFP[i-1][j]) + (FM[i][j] - 0.5*dx*dFM[i][j]);
-		  FR[j] = (FP[i][j] + 0.5*dx*dFP[i][j]) + (FM[i+1][j] - 0.5*dx*dFM[i+1][j]);
-		  U_new[i][j] = U[i][j] - (dt/dx)*(FR[j]-FL[j]);
+		  U_new[i][j] = U[i][j] - (dt/dx)*(FR[i][j]-FL[i][j]);
 		}
 
 		dens[i] = U_new[i][0];
@@ -222,8 +158,6 @@ void Free()
         free(press);
         free(cx);
         free(F);
-        free(FL);
-        free(FR);
 
 }
 
